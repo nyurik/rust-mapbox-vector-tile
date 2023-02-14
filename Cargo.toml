@@ -12,7 +12,6 @@ rust-version = "1.58"
 build = "build.rs"
 
 [dependencies]
-failure = "0.1.1"
 flate2 = "1.0.1"
 geo = "0.23"
 geo-types = "0.7"
@@ -21,6 +20,7 @@ serde = "1"
 serde_derive = "1"
 serde_json = "1"
 slippy-map-tiles = "0.16"
+thiserror = "1"
 
 [build-dependencies]
 protobuf-codegen = "3.2"

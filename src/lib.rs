@@ -4,7 +4,6 @@ use std::io::prelude::*;
 use std::io::BufWriter;
 use std::rc::Rc;
 
-use failure::{format_err, Error};
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -19,6 +18,32 @@ mod proto {
     include!(concat!(env!("OUT_DIR"), "/mod.rs"));
 }
 use proto::vector_tile;
+
+use crate::Error::*;
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Drawing commands are invalid. There are {} commands, and it must be a multiple of 3: {0:?}", (.0).0.len())]
+    InvalidDrawingCommands(DrawingCommands),
+
+    #[error("Invalid number of points for a polygon, got {0} and we need > 1: cmds: {1:?}")]
+    InvalidPolygonPointCount(usize, Vec<DrawingCommand>),
+
+    #[error("No valid polygons created")]
+    NoValidPolygons,
+
+    #[error("No valid rings created")]
+    NoValidRings,
+
+    #[error("Expecting a LineTo command, got a {:?}. All cmds {0:?}", .0[1])]
+    UnexpectedDrawingCommand(Vec<DrawingCommand>),
+
+    #[error("IO Error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Protobuf parsing error: {0}")]
+    Pbf(#[from] protobuf::Error),
+}
 
 /// What should be done if, when parsing a file, there's an invalid geometry, i.e. the MVT file is
 /// invalid
@@ -747,7 +772,7 @@ impl DrawingCommands {
                 let mut cx = 0;
                 let mut cy = 0;
                 if commands.0.len() % 3 != 0 {
-                    return Err(format_err!("Drawing commands are invalid. There are {} commands, and it must be a multiple of 3: {commands:?}", commands.0.len()));
+                    return Err(InvalidDrawingCommands(commands));
                 }
                 let mut rings = Vec::with_capacity(commands.0.len() / 3);
                 for cmds in commands.0.chunks(3) {
@@ -768,7 +793,7 @@ impl DrawingCommands {
                             // I have seen live data which is MoveTo([(77, -11)]), LineTo([(0,
                             // 0)]), ClosePath, that's invalid MVT data. "continue" means don't add
                             // linestring_points to rings, meaning this ring will be skipped
-                            return Err(format_err!("Invalid number of points for a polygon, got {} and we need > 1: cmds: {cmds:?}", points.len()));
+                            return Err(InvalidPolygonPointCount(points.len(), cmds.to_vec()));
                         }
                         linestring_points.reserve(points.len());
                         for &(dx, dy) in points.iter() {
@@ -777,10 +802,7 @@ impl DrawingCommands {
                             linestring_points.push(Coord { x: cx, y: cy });
                         }
                     } else {
-                        return Err(format_err!(
-                            "Expecting a LineTo command, got a {:?}. All cmds {cmds:?}",
-                            cmds[1],
-                        ));
+                        return Err(UnexpectedDrawingCommand(cmds.to_vec()));
                     }
                     if let DrawingCommand::ClosePath = cmds[2] {
                         // FIXME add first/last point
@@ -793,7 +815,7 @@ impl DrawingCommands {
                 }
 
                 if rings.is_empty() {
-                    return Err(format_err!("No valid rings created"));
+                    return Err(NoValidRings);
                 }
                 let mut polygons = Vec::new();
                 loop {
@@ -814,7 +836,7 @@ impl DrawingCommands {
                     polygons.push(Polygon::new(exterior_ring, inner_rings));
                 }
                 if polygons.is_empty() {
-                    return Err(format_err!("No valid polygons created"));
+                    return Err(NoValidPolygons);
                 }
 
                 if polygons.len() == 1 {
@@ -1146,8 +1168,8 @@ mod test {
     #[test]
     fn test_creation() {
         let mut t = Tile::new();
-        let l: Layer = Layer::new("fart".to_string());
-        let l: Layer = "hello".into();
+        let _l: Layer = Layer::new("fart".to_string());
+        let _l: Layer = "hello".into();
 
         assert_eq!(t.layers.len(), 0);
         t.add_layer("poop");
@@ -1170,7 +1192,7 @@ mod test {
         p.insert("name".to_string(), "bar");
         p.insert("visible".to_string(), false);
 
-        let p = Properties::new()
+        let _p = Properties::new()
             .set("foo".to_string(), "bar".to_string())
             .set("num".to_string(), 10i64)
             .set("visible".to_string(), false);
