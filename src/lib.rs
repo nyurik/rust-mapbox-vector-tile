@@ -1,36 +1,19 @@
-#![allow(unused_variables, dead_code, unused_mut, unused_imports)]
-extern crate flate2;
-extern crate geo;
-extern crate protobuf;
-extern crate slippy_map_tiles;
-
-#[macro_use]
-extern crate serde_derive;
-
-#[macro_use]
-extern crate failure;
-
-extern crate serde;
-extern crate serde_json;
-
-use protobuf::Message;
+use std::collections::HashMap;
 use std::fs::File;
-use std::hash::{Hash, Hasher};
 use std::io::prelude::*;
 use std::io::BufWriter;
-use std::io::Cursor;
 use std::rc::Rc;
 
-use failure::Error;
+use failure::{format_err, Error};
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use geo::orient::{Direction, Orient};
 use geo::winding_order::{Winding, WindingOrder};
 use geo::{Coord, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
-use std::collections::{BTreeMap, HashMap, HashSet};
-
-use serde::ser::{Serialize, SerializeMap, Serializer};
+use geo_types::CoordNum;
+use protobuf::Message;
+use serde_derive::Serialize;
 
 mod proto {
     include!(concat!(env!("OUT_DIR"), "/mod.rs"));
@@ -69,9 +52,9 @@ impl Properties {
 
 /// A single feature. It has a geometry and some properties (i.e. tags)
 #[derive(Debug, PartialEq, Clone)]
-pub struct Feature {
+pub struct Feature<T: CoordNum = i32> {
     /// The geometry
-    pub geometry: Geometry<i32>,
+    pub geometry: Geometry<T>,
 
     /// The properties. Uses an `Rc` because properties can be shared between tiles.
     pub properties: Rc<Properties>,
@@ -86,7 +69,7 @@ impl Feature {
         }
     }
 
-    /// Create a feature (with no propertes) from this geometry.
+    /// Create a feature (with no properties) from this geometry.
     pub fn from_geometry(geometry: Geometry<i32>) -> Self {
         Feature::new(geometry, Rc::new(Properties::new()))
     }
@@ -242,7 +225,7 @@ where
             ._data
             .iter()
             .enumerate()
-            .filter(|&(i, &(num, ref val))| val == item)
+            .filter(|&(_i, &(_num, ref val))| val == item)
             .take(1)
             .next()
         {
@@ -276,7 +259,7 @@ where
         self._data
             .iter()
             .enumerate()
-            .filter_map(|(i, &(num, ref val))| if val == item { Some(i) } else { None })
+            .filter_map(|(i, &(_num, ref val))| if val == item { Some(i) } else { None })
             .take(1)
             .next()
             .unwrap()
@@ -408,7 +391,7 @@ impl Tile {
         bytes: &[u8],
         invalid_geom_tactic: InvalidGeometryTactic,
     ) -> Result<Tile, Error> {
-        let mut tile = vector_tile::Tile::parse_from_bytes(bytes)?;
+        let tile = vector_tile::Tile::parse_from_bytes(bytes)?;
         pbftile_to_tile(tile, invalid_geom_tactic)
     }
 
@@ -601,7 +584,7 @@ impl From<Value> for vector_tile::tile::Value {
 
 // FIXME use std::convert types, but it needs the mut
 fn pbftile_to_tile(
-    mut tile: vector_tile::Tile,
+    tile: vector_tile::Tile,
     invalid_geom_tactic: InvalidGeometryTactic,
 ) -> Result<Tile, Error> {
     Ok(Tile {
@@ -626,7 +609,7 @@ fn pbflayer_to_layer(
     // TODO this is a filter in a ? so Some(Err(_)) is a bit messy
     let features: Vec<Feature> = features
         .into_iter()
-        .filter_map(|mut f| {
+        .filter_map(|f| {
             // TODO do we need the clone on values? I get a 'cannot move out of indexed context'
             // otherwise
             let properties: HashMap<Rc<String>, Value> = f
@@ -672,9 +655,9 @@ impl DrawingCommand {
         matches!(self, &DrawingCommand::MoveTo(_))
     }
 
-    fn is_lineto(&self) -> bool {
-        matches!(self, &DrawingCommand::LineTo(_))
-    }
+    // fn is_lineto(&self) -> bool {
+    //     matches!(self, &DrawingCommand::LineTo(_))
+    // }
 
     fn is_closepath(&self) -> bool {
         matches!(self, &DrawingCommand::ClosePath)
@@ -817,7 +800,7 @@ impl DrawingCommands {
                     if rings.is_empty() {
                         break;
                     }
-                    let (exterior_ring, winding_order) = rings.remove(0);
+                    let (exterior_ring, _winding_order) = rings.remove(0);
                     let mut inner_rings = Vec::new();
                     if !rings.is_empty() {
                         loop {
@@ -900,7 +883,7 @@ impl From<Vec<u32>> for DrawingCommands {
 
 fn decode_geom(
     data: &[u32],
-    geom_type: &vector_tile::tile::GeomType,
+    _geom_type: &vector_tile::tile::GeomType,
 ) -> Result<Geometry<i32>, Error> {
     let cmds: DrawingCommands = data.into();
     cmds.try_to_geometry()
@@ -909,7 +892,7 @@ fn decode_geom(
 fn deduce_geom_type(cmds: &DrawingCommands) -> vector_tile::tile::GeomType {
     let cmds = &cmds.0;
 
-    // There are definitly ways for the input to be invalid where it should return UNKNOWN. e.g.
+    // There are definitely ways for the input to be invalid where it should return UNKNOWN. e.g.
     // vec![DrawingCommands::ClosePath] would be POLYGON, but that's not a valid polygon, so it
     // should be UNKNOWN. But for valid DrawingCommands, it should be accurate.
 
@@ -982,7 +965,7 @@ impl<'a> From<&'a MultiLineString<i32>> for DrawingCommands {
         let mut cmds = Vec::with_capacity(2 * mls.0.len());
         let mut cursor = (0, 0);
 
-        for (line_idx, line) in mls.0.iter().enumerate() {
+        for (_line_idx, line) in mls.0.iter().enumerate() {
             cmds.push(DrawingCommand::MoveTo(vec![move_cursor(
                 &mut cursor,
                 &line.0[0],
