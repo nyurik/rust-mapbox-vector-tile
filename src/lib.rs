@@ -10,7 +10,6 @@ use flate2::Compression;
 use geo::orient::{Direction, Orient};
 use geo::winding_order::{Winding, WindingOrder};
 use geo::{Coord, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
-use geo_types::CoordNum;
 use protobuf::Message;
 use serde_derive::Serialize;
 
@@ -77,9 +76,9 @@ impl Properties {
 
 /// A single feature. It has a geometry and some properties (i.e. tags)
 #[derive(Debug, PartialEq, Clone)]
-pub struct Feature<T: CoordNum = i32> {
+pub struct Feature {
     /// The geometry
-    pub geometry: Geometry<T>,
+    pub geometry: Geometry<i32>,
 
     /// The properties. Uses an `Rc` because properties can be shared between tiles.
     pub properties: Rc<Properties>,
