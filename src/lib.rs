@@ -88,7 +88,7 @@ pub struct Feature<T: CoordNum = i32> {
 impl Feature {
     /// Create a Feature with this `geometry` and these `properties`
     pub fn new(geometry: Geometry<i32>, properties: Rc<Properties>) -> Self {
-        Feature {
+        Self {
             geometry,
             properties,
         }
@@ -96,7 +96,7 @@ impl Feature {
 
     /// Create a feature (with no properties) from this geometry.
     pub fn from_geometry(geometry: Geometry<i32>) -> Self {
-        Feature::new(geometry, Rc::new(Properties::new()))
+        Self::new(geometry, Rc::new(Properties::new()))
     }
 
     pub fn get_point(&self) -> Option<Point<i32>> {
@@ -130,8 +130,8 @@ impl Feature {
 
 /// Convert a geometry to a feature.
 impl From<Geometry<i32>> for Feature {
-    fn from(geom: Geometry<i32>) -> Feature {
-        Feature::from_geometry(geom)
+    fn from(geom: Geometry<i32>) -> Self {
+        Self::from_geometry(geom)
     }
 }
 
@@ -151,7 +151,7 @@ pub struct Layer {
 impl Layer {
     /// Create an empty layer with this name (and 4096 extent)
     pub fn new<S: Into<String>>(name: S) -> Self {
-        Layer {
+        Self {
             name: name.into(),
             features: Vec::new(),
             extent: 4096,
@@ -160,7 +160,7 @@ impl Layer {
 
     /// Construct layer with this name and extent
     pub fn new_and_extent(name: String, extent: u32) -> Self {
-        Layer {
+        Self {
             name,
             features: Vec::new(),
             extent,
@@ -218,13 +218,13 @@ impl Layer {
 
 // TODO probably some way to merge these
 impl From<String> for Layer {
-    fn from(name: String) -> Layer {
-        Layer::new(name)
+    fn from(name: String) -> Self {
+        Self::new(name)
     }
 }
 impl<'a> From<&'a str> for Layer {
-    fn from(name: &str) -> Layer {
-        Layer::new(name.to_string())
+    fn from(name: &str) -> Self {
+        Self::new(name.to_string())
     }
 }
 
@@ -242,7 +242,7 @@ where
     T: Sized + PartialEq + ToOwned + Clone,
 {
     fn new() -> Self {
-        TagIndex { _data: Vec::new() }
+        Self { _data: Vec::new() }
     }
 
     fn add_item(&mut self, item: &T) {
@@ -312,7 +312,7 @@ fn create_indexes(features: &[Feature]) -> (TagIndex<String>, TagIndex<Value>) {
 
 impl From<Layer> for vector_tile::tile::Layer {
     fn from(v: Layer) -> Self {
-        let mut res = vector_tile::tile::Layer::new();
+        let mut res = Self::new();
 
         let Layer {
             name,
@@ -382,47 +382,47 @@ impl Tile {
     }
 
     /// Read compressed .mvt file and parse it
-    pub fn from_file(filename: &str) -> Result<Tile, Error> {
+    pub fn from_file(filename: &str) -> Result<Self, Error> {
         let mut file = File::open(filename)?;
         let mut contents: Vec<u8> = Vec::new();
         file.read_to_end(&mut contents)?;
         // FIXME if the gzip file is empty then return something sensible
 
-        Tile::from_compressed_bytes(&contents)
+        Self::from_compressed_bytes(&contents)
     }
 
     /// Try to parse a VT from some (gzip) compressed bytes
-    pub fn from_compressed_bytes(bytes: &[u8]) -> Result<Tile, Error> {
-        Tile::from_compressed_bytes_with_tactic(bytes, InvalidGeometryTactic::StopProcessing)
+    pub fn from_compressed_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        Self::from_compressed_bytes_with_tactic(bytes, InvalidGeometryTactic::StopProcessing)
     }
 
     pub fn from_compressed_bytes_with_tactic(
         bytes: &[u8],
         invalid_geom_tactic: InvalidGeometryTactic,
-    ) -> Result<Tile, Error> {
+    ) -> Result<Self, Error> {
         let mut decompressor = GzDecoder::new(bytes);
         let mut contents: Vec<u8> = Vec::new();
         decompressor.read_to_end(&mut contents).unwrap();
 
-        Tile::from_uncompressed_bytes_with_tactic(&contents, invalid_geom_tactic)
+        Self::from_uncompressed_bytes_with_tactic(&contents, invalid_geom_tactic)
     }
 
     /// Try to parse a VT from some uncompressed bytes. i.e. raw protobuf
-    pub fn from_uncompressed_bytes(bytes: &[u8]) -> Result<Tile, Error> {
-        Tile::from_uncompressed_bytes_with_tactic(bytes, InvalidGeometryTactic::StopProcessing)
+    pub fn from_uncompressed_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        Self::from_uncompressed_bytes_with_tactic(bytes, InvalidGeometryTactic::StopProcessing)
     }
 
     pub fn from_uncompressed_bytes_with_tactic(
         bytes: &[u8],
         invalid_geom_tactic: InvalidGeometryTactic,
-    ) -> Result<Tile, Error> {
+    ) -> Result<Self, Error> {
         let tile = vector_tile::Tile::parse_from_bytes(bytes)?;
         pbftile_to_tile(tile, invalid_geom_tactic)
     }
 
     /// Construct a tile from some layers
     pub fn from_layers(layers: Vec<Layer>) -> Self {
-        Tile { layers }
+        Self { layers }
     }
 
     pub fn set_locations(&mut self, geometry_tile: &slippy_map_tiles::Tile) {
@@ -504,7 +504,7 @@ impl Tile {
 
 impl From<Tile> for vector_tile::Tile {
     fn from(v: Tile) -> Self {
-        let mut result = vector_tile::Tile::new();
+        let mut result = Self::new();
 
         for layer in v.layers {
             if !layer.is_empty() {
@@ -529,67 +529,67 @@ pub enum Value {
 }
 
 impl From<String> for Value {
-    fn from(x: String) -> Value {
-        Value::String(Rc::new(x))
+    fn from(x: String) -> Self {
+        Self::String(Rc::new(x))
     }
 }
 impl<'a> From<&'a str> for Value {
-    fn from(x: &str) -> Value {
-        Value::String(Rc::new(x.to_owned()))
+    fn from(x: &str) -> Self {
+        Self::String(Rc::new(x.to_owned()))
     }
 }
 
 impl From<f32> for Value {
-    fn from(x: f32) -> Value {
-        Value::Float(x)
+    fn from(x: f32) -> Self {
+        Self::Float(x)
     }
 }
 impl From<f64> for Value {
-    fn from(x: f64) -> Value {
-        Value::Double(x)
+    fn from(x: f64) -> Self {
+        Self::Double(x)
     }
 }
 impl From<i64> for Value {
-    fn from(x: i64) -> Value {
-        Value::SInt(x)
+    fn from(x: i64) -> Self {
+        Self::SInt(x)
     }
 }
 impl From<u64> for Value {
-    fn from(x: u64) -> Value {
-        Value::UInt(x)
+    fn from(x: u64) -> Self {
+        Self::UInt(x)
     }
 }
 impl From<bool> for Value {
-    fn from(x: bool) -> Value {
-        Value::Boolean(x)
+    fn from(x: bool) -> Self {
+        Self::Boolean(x)
     }
 }
 
 impl From<vector_tile::tile::Value> for Value {
-    fn from(val: vector_tile::tile::Value) -> Value {
+    fn from(val: vector_tile::tile::Value) -> Self {
         if val.has_string_value() {
-            Value::String(Rc::new(val.string_value().into()))
+            Self::String(Rc::new(val.string_value().into()))
         } else if val.has_float_value() {
-            Value::Float(val.float_value())
+            Self::Float(val.float_value())
         } else if val.has_double_value() {
-            Value::Double(val.double_value())
+            Self::Double(val.double_value())
         } else if val.has_int_value() {
-            Value::Int(val.int_value())
+            Self::Int(val.int_value())
         } else if val.has_uint_value() {
-            Value::UInt(val.uint_value())
+            Self::UInt(val.uint_value())
         } else if val.has_sint_value() {
-            Value::SInt(val.sint_value())
+            Self::SInt(val.sint_value())
         } else if val.has_bool_value() {
-            Value::Boolean(val.bool_value())
+            Self::Boolean(val.bool_value())
         } else {
-            Value::Unknown
+            Self::Unknown
         }
     }
 }
 
 impl From<Value> for vector_tile::tile::Value {
     fn from(val: Value) -> Self {
-        let mut res = vector_tile::tile::Value::new();
+        let mut res = Self::new();
         match val {
             Value::String(s) => {
                 res.set_string_value(Rc::try_unwrap(s).unwrap_or_else(|s| (*s).clone()))
@@ -677,7 +677,7 @@ pub enum DrawingCommand {
 
 impl DrawingCommand {
     fn is_moveto(&self) -> bool {
-        matches!(self, &DrawingCommand::MoveTo(_))
+        matches!(self, &Self::MoveTo(_))
     }
 
     // fn is_lineto(&self) -> bool {
@@ -685,7 +685,7 @@ impl DrawingCommand {
     // }
 
     fn is_closepath(&self) -> bool {
-        matches!(self, &DrawingCommand::ClosePath)
+        matches!(self, &Self::ClosePath)
     }
 }
 
@@ -853,7 +853,7 @@ impl DrawingCommands {
 }
 
 impl<'a> From<&'a [u32]> for DrawingCommands {
-    fn from(data: &[u32]) -> DrawingCommands {
+    fn from(data: &[u32]) -> Self {
         let mut res = Vec::new();
 
         let mut idx = 0;
@@ -893,12 +893,12 @@ impl<'a> From<&'a [u32]> for DrawingCommands {
             });
         }
 
-        DrawingCommands(res)
+        Self(res)
     }
 }
 
 impl From<Vec<u32>> for DrawingCommands {
-    fn from(data: Vec<u32>) -> DrawingCommands {
+    fn from(data: Vec<u32>) -> Self {
         data.as_slice().into()
     }
 }
@@ -942,25 +942,25 @@ fn move_cursor(current: &mut (i32, i32), point: &Coord<i32>) -> (i32, i32) {
 
 // FIXME these 2 conversions should be TryFrom which throw an error for non-integer coords
 impl<'a> From<&'a Point<i32>> for DrawingCommands {
-    fn from(point: &'a Point<i32>) -> DrawingCommands {
-        DrawingCommands(vec![DrawingCommand::MoveTo(vec![(point.x(), point.y())])])
+    fn from(point: &'a Point<i32>) -> Self {
+        Self(vec![DrawingCommand::MoveTo(vec![(point.x(), point.y())])])
     }
 }
 
 impl<'a> From<&'a MultiPoint<i32>> for DrawingCommands {
-    fn from(mp: &'a MultiPoint<i32>) -> DrawingCommands {
+    fn from(mp: &'a MultiPoint<i32>) -> Self {
         let mut offsets = Vec::with_capacity(mp.0.len());
         let mut cursor = (0, 0);
         for p in &mp.0 {
             offsets.push(move_cursor(&mut cursor, &p.0));
         }
 
-        DrawingCommands(vec![DrawingCommand::MoveTo(offsets)])
+        Self(vec![DrawingCommand::MoveTo(offsets)])
     }
 }
 
 impl<'a> From<&'a LineString<i32>> for DrawingCommands {
-    fn from(ls: &'a LineString<i32>) -> DrawingCommands {
+    fn from(ls: &'a LineString<i32>) -> Self {
         // FIXME error check <2 points
         let mut cmds = Vec::with_capacity(2);
         let mut cursor = (0, 0);
@@ -976,12 +976,12 @@ impl<'a> From<&'a LineString<i32>> for DrawingCommands {
 
         cmds.push(DrawingCommand::LineTo(offsets));
 
-        DrawingCommands(cmds)
+        Self(cmds)
     }
 }
 
 impl<'a> From<&'a MultiLineString<i32>> for DrawingCommands {
-    fn from(mls: &'a MultiLineString<i32>) -> DrawingCommands {
+    fn from(mls: &'a MultiLineString<i32>) -> Self {
         // FIXME check for zero linestrings
 
         let mut cmds = Vec::with_capacity(2 * mls.0.len());
@@ -1003,12 +1003,12 @@ impl<'a> From<&'a MultiLineString<i32>> for DrawingCommands {
             cmds.push(DrawingCommand::LineTo(offsets));
         }
 
-        DrawingCommands(cmds)
+        Self(cmds)
     }
 }
 
 impl<'a> From<&'a Polygon<i32>> for DrawingCommands {
-    fn from(poly: &'a Polygon<i32>) -> DrawingCommands {
+    fn from(poly: &'a Polygon<i32>) -> Self {
         // Direction::Default means ext rings are ccw, but the vtile spec requires CW. *However*
         // vtiles have an inverted Y axis (Y is positive down), so this makes it work
         let poly = poly.orient(Direction::Default);
@@ -1050,12 +1050,12 @@ impl<'a> From<&'a Polygon<i32>> for DrawingCommands {
             cmds.push(DrawingCommand::ClosePath);
         }
 
-        DrawingCommands(cmds)
+        Self(cmds)
     }
 }
 
 impl<'a> From<&'a MultiPolygon<i32>> for DrawingCommands {
-    fn from(mpoly: &'a MultiPolygon<i32>) -> DrawingCommands {
+    fn from(mpoly: &'a MultiPolygon<i32>) -> Self {
         // Direction::Default means ext rings are ccw, but the vtile spec requires CW. *However*
         // vtiles have an inverted Y axis (Y is positive down), so this makes it work
         let mpoly = mpoly.orient(Direction::Default);
@@ -1099,12 +1099,12 @@ impl<'a> From<&'a MultiPolygon<i32>> for DrawingCommands {
             }
         }
 
-        DrawingCommands(cmds)
+        Self(cmds)
     }
 }
 
 impl<'a> From<&'a Geometry<i32>> for DrawingCommands {
-    fn from(g: &'a Geometry<i32>) -> DrawingCommands {
+    fn from(g: &'a Geometry<i32>) -> Self {
         match g {
             Geometry::Point(x) => x.into(),
             Geometry::LineString(x) => x.into(),
@@ -1118,8 +1118,8 @@ impl<'a> From<&'a Geometry<i32>> for DrawingCommands {
 }
 
 impl From<DrawingCommands> for Vec<u32> {
-    fn from(dc: DrawingCommands) -> Vec<u32> {
-        let mut res = Vec::with_capacity(dc.0.len());
+    fn from(dc: DrawingCommands) -> Self {
+        let mut res = Self::with_capacity(dc.0.len());
         for cmd in dc.0 {
             match cmd {
                 DrawingCommand::MoveTo(points) => {
