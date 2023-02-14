@@ -21,7 +21,7 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use std::collections::{HashMap, HashSet, BTreeMap};
-use geo::{Geometry, Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon, Coordinate};
+use geo::{Geometry, Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon, Coord};
 use geo::orient::{Orient, Direction};
 use geo::winding_order::{Winding, WindingOrder};
 use flate2::write::GzEncoder;
@@ -31,7 +31,10 @@ use failure::Error;
 
 use serde::ser::{Serialize, Serializer, SerializeMap};
 
-mod vector_tile;
+mod proto {
+    include!(concat!(env!("OUT_DIR"), "/mod.rs"));
+}
+use proto::vector_tile;
 
 /// What should be done if, when parsing a file, there's an invalid geometry, i.e. the MVT file is
 /// invalid
@@ -68,8 +71,8 @@ impl Properties {
 #[derive(Debug,PartialEq,Clone)]
 pub struct Feature {
 
-    /// The geomtry
-    pub geometry: geo::Geometry<i32>,
+    /// The geometry
+    pub geometry: Geometry<i32>,
 
     /// The properties. Uses an `Rc` because properties can be shared between tiles.
     pub properties: Rc<Properties>,
@@ -78,7 +81,7 @@ pub struct Feature {
 impl Feature {
     /// Create a Feature with this `geometry` and these `properties`
     pub fn new(geometry: Geometry<i32>, properties: Rc<Properties>) -> Self {
-        Feature{ geometry: geometry, properties: properties }
+        Feature{ geometry, properties }
     }
 
     /// Create a feature (with no propertes) from this geometry.
@@ -145,7 +148,7 @@ impl Layer {
 
     /// Construct layer with this name and extent
     pub fn new_and_extent(name: String, extent: u32) -> Self {
-        Layer{ name: name, features: Vec::new(), extent: extent }
+        Layer{ name, features: Vec::new(), extent }
     }
 
     /// Move all the geometries in this layer so that it's at this `geometry_tile`.
@@ -164,7 +167,6 @@ impl Layer {
         for f in self.features.iter_mut() {
             f.translate_geometry(&x_func, &y_func);
         }
-        
     }
 
     /// Add a feature to this layer.
@@ -179,12 +181,12 @@ impl Layer {
     }
 
     /// Encode this layer to the `writer`.
-    pub fn write_to<W: std::io::Write>(self, writer: &mut W)  {
+    pub fn write_to<W: Write>(self, writer: &mut W)  {
         if self.is_empty() {
             return;
         }
 
-        let converted: vector_tile::Tile_Layer = self.into();
+        let converted: vector_tile::tile::Layer = self.into();
         let mut cos = protobuf::CodedOutputStream::new(writer);
         converted.write_to(&mut cos).unwrap();
         cos.flush().unwrap();
@@ -277,9 +279,9 @@ fn create_indexes(features: &Vec<Feature>) -> (TagIndex<String>, TagIndex<Value>
     (keys, values)
 }
 
-impl Into<vector_tile::Tile_Layer> for Layer {
-    fn into(self) -> vector_tile::Tile_Layer {
-        let mut res = vector_tile::Tile_Layer::new();
+impl Into<vector_tile::tile::Layer> for Layer {
+    fn into(self) -> vector_tile::tile::Layer {
+        let mut res = vector_tile::tile::Layer::new();
 
         let Layer{ name, features, extent } = self;
 
@@ -292,34 +294,34 @@ impl Into<vector_tile::Tile_Layer> for Layer {
 
         // There's lots of 'cannot move out of borrowed context' errors here
         for f in features.into_iter() {
-            let mut pbf_feature = vector_tile::Tile_Feature::new();
+            let mut pbf_feature = vector_tile::tile::Feature::new();
             for (k, v) in f.properties.0.iter() {
-                pbf_feature.mut_tags().push(keys.index_for_item(k) as u32);
-                pbf_feature.mut_tags().push(values.index_for_item(&v) as u32);
+                pbf_feature.tags.push(keys.index_for_item(k) as u32);
+                pbf_feature.tags.push(values.index_for_item(&v) as u32);
             }
             let geom: DrawingCommands = (&f.geometry).into();
-            pbf_feature.set_geometry(geom.into());
+            pbf_feature.geometry = geom.into();
 
-            pbf_feature.set_field_type(match f.geometry {
-                Geometry::Point(_) => vector_tile::Tile_GeomType::POINT,
-                Geometry::MultiPoint(_) => vector_tile::Tile_GeomType::POINT,
-                Geometry::LineString(_) => vector_tile::Tile_GeomType::LINESTRING,
-                Geometry::MultiLineString(_) => vector_tile::Tile_GeomType::LINESTRING,
-                Geometry::Polygon(_) => vector_tile::Tile_GeomType::POLYGON,
-                Geometry::MultiPolygon(_) => vector_tile::Tile_GeomType::POLYGON,
-                _ => vector_tile::Tile_GeomType::UNKNOWN
+            pbf_feature.set_type(match f.geometry {
+                Geometry::Point(_) => vector_tile::tile::GeomType::POINT,
+                Geometry::MultiPoint(_) => vector_tile::tile::GeomType::POINT,
+                Geometry::LineString(_) => vector_tile::tile::GeomType::LINESTRING,
+                Geometry::MultiLineString(_) => vector_tile::tile::GeomType::LINESTRING,
+                Geometry::Polygon(_) => vector_tile::tile::GeomType::POLYGON,
+                Geometry::MultiPolygon(_) => vector_tile::tile::GeomType::POLYGON,
+                _ => vector_tile::tile::GeomType::UNKNOWN
             });
 
 
-            res.mut_features().push(pbf_feature);
+            res.features.push(pbf_feature);
         }
 
         // set the keys & values
         for k in keys._data.into_iter().map(|x| x.1) {
-            res.mut_keys().push(k)
+            res.keys.push(k)
         }
         for v in values._data.into_iter().map(|x| x.1) {
-            res.mut_values().push(v.into())
+            res.values.push(v.into())
         }
 
         res
@@ -377,13 +379,13 @@ impl Tile {
     }
 
     pub fn from_uncompressed_bytes_with_tactic(bytes: &[u8], invalid_geom_tactic: InvalidGeometryTactic) -> Result<Tile, Error> {
-        let mut tile: vector_tile::Tile = protobuf::parse_from_bytes(&bytes)?;
+        let mut tile = vector_tile::Tile::parse_from_bytes(&bytes)?;
         pbftile_to_tile(tile, invalid_geom_tactic)
     }
 
     /// Construct a tile from some layers
     pub fn from_layers(layers: Vec<Layer>) -> Self {
-        Tile{ layers: layers }
+        Tile{ layers }
     }
 
     pub fn set_locations(&mut self, geometry_tile: &slippy_map_tiles::Tile) {
@@ -415,7 +417,7 @@ impl Tile {
         new_bytes
     }
 
-    pub fn write_to<W: std::io::Write>(self, writer: &mut W)  {
+    pub fn write_to<W: Write>(self, writer: &mut W)  {
         if self.is_empty() {
             return;
         }
@@ -462,7 +464,7 @@ impl Into<vector_tile::Tile> for Tile {
 
         for layer in self.layers.into_iter() {
             if ! layer.is_empty() {
-                result.mut_layers().push(layer.into());
+                result.layers.push(layer.into());
             }
         }
 
@@ -492,31 +494,31 @@ impl From<u64> for Value { fn from(x: u64) -> Value { Value::UInt(x) } }
 impl From<bool> for Value { fn from(x: bool) -> Value { Value::Boolean(x) } }
 
 
-impl From<vector_tile::Tile_Value> for Value {
-    fn from(val: vector_tile::Tile_Value) -> Value {
+impl From<vector_tile::tile::Value> for Value {
+    fn from(val: vector_tile::tile::Value) -> Value {
         if val.has_string_value() {
-            Value::String(Rc::new(val.get_string_value().into()))
+            Value::String(Rc::new(val.string_value().into()))
         } else if val.has_float_value() {
-            Value::Float(val.get_float_value())
+            Value::Float(val.float_value())
         } else if val.has_double_value() {
-            Value::Double(val.get_double_value())
+            Value::Double(val.double_value())
         } else if val.has_int_value() {
-            Value::Int(val.get_int_value())
+            Value::Int(val.int_value())
         } else if val.has_uint_value() {
-            Value::UInt(val.get_uint_value())
+            Value::UInt(val.uint_value())
         } else if val.has_sint_value() {
-            Value::SInt(val.get_sint_value())
+            Value::SInt(val.sint_value())
         } else if val.has_bool_value() {
-            Value::Boolean(val.get_bool_value())
+            Value::Boolean(val.bool_value())
         } else {
             Value::Unknown
         }
     }
 }
 
-impl Into<vector_tile::Tile_Value> for Value {
-    fn into(self) -> vector_tile::Tile_Value {
-        let mut res = vector_tile::Tile_Value::new();
+impl Into<vector_tile::tile::Value> for Value {
+    fn into(self) -> vector_tile::tile::Value {
+        let mut res = vector_tile::tile::Value::new();
         match self {
             Value::String(s) => res.set_string_value(Rc::try_unwrap(s).unwrap_or_else(|s| (&*s).clone())),
             Value::Float(s) => res.set_float_value(s),
@@ -535,23 +537,23 @@ impl Into<vector_tile::Tile_Value> for Value {
 
 // FIXME use std::convert types, but it needs the mut
 fn pbftile_to_tile(mut tile: vector_tile::Tile, invalid_geom_tactic: InvalidGeometryTactic) -> Result<Tile, Error> {
-    Ok(Tile{ layers: tile.take_layers().into_iter().map(|l| pbflayer_to_layer(l, invalid_geom_tactic)).collect::<Result<Vec<_>, Error>>()? })
+    Ok(Tile{ layers: tile.layers.into_iter().map(|l| pbflayer_to_layer(l, invalid_geom_tactic)).collect::<Result<Vec<_>, Error>>()? })
 }
 
-fn pbflayer_to_layer(mut layer: vector_tile::Tile_Layer, invalid_geom_tactic: InvalidGeometryTactic) -> Result<Layer, Error> {
+fn pbflayer_to_layer(mut layer: vector_tile::tile::Layer, invalid_geom_tactic: InvalidGeometryTactic) -> Result<Layer, Error> {
     let name = layer.take_name();
-    let extent = layer.get_extent();
-    let features = layer.take_features();
-    let keys = layer.take_keys();
-    let values = layer.take_values();
+    let extent = layer.extent();
+    let features = layer.features;
+    let keys = layer.keys;
+    let values = layer.values;
 
     // TODO this is a filter in a ? so Some(Err(_)) is a bit messy
     let features: Vec<Feature> = features.into_iter().filter_map(|mut f| {
         // TODO do we need the clone on values? I get a 'cannot move out of indexed context'
         // otherwise
-        let properties: HashMap<Rc<String>, Value> = f.take_tags().chunks(2).map(|kv: &[u32]| (Rc::new(keys[kv[0] as usize].clone()), values[kv[1] as usize].clone().into())).collect();
+        let properties: HashMap<Rc<String>, Value> = f.tags.chunks(2).map(|kv: &[u32]| (Rc::new(keys[kv[0] as usize].clone()), values[kv[1] as usize].clone().into())).collect();
 
-        match decode_geom(f.get_geometry(), &f.get_field_type()) {
+        match decode_geom(&f.geometry, &f.type_()) {
             Ok(geom) => {
                 Some(Ok(Feature { properties: Rc::new(Properties(properties)), geometry: geom }))
             },
@@ -568,7 +570,7 @@ fn pbflayer_to_layer(mut layer: vector_tile::Tile_Layer, invalid_geom_tactic: In
         }
     }).collect::<Result<Vec<_>, Error>>()?;
     
-    Ok(Layer{ name: name, extent: extent, features: features })
+    Ok(Layer{ name, extent, features })
 
 }
 
@@ -615,7 +617,7 @@ impl DrawingCommands {
         let geom_type = deduce_geom_type(&commands);
 
         match geom_type {
-            vector_tile::Tile_GeomType::POINT => {
+            vector_tile::tile::GeomType::POINT => {
                 // Specs define this, but maybe we should make this return a Result instead of an
                 // assertion
                 assert_eq!(commands.0.len(), 1);
@@ -642,7 +644,7 @@ impl DrawingCommands {
                     _ => { unreachable!() },
                 }
             },
-            vector_tile::Tile_GeomType::LINESTRING => {
+            vector_tile::tile::GeomType::LINESTRING => {
                 let mut cx = 0;
                 let mut cy = 0;
                 assert_eq!(commands.0.len() % 2, 0);
@@ -657,7 +659,7 @@ impl DrawingCommands {
                         let (dx, dy) = points[0];
                         cx += dx;
                         cy += dy;
-                        linestring_points.push(Coordinate{x: cx as i32, y: cy as i32});
+                        linestring_points.push(Coord{x: cx as i32, y: cy as i32});
                     } else {
                         assert!(false);
                     }
@@ -667,7 +669,7 @@ impl DrawingCommands {
                         for &(dx, dy) in points.into_iter() {
                             cx += dx;
                             cy += dy;
-                            linestring_points.push(Coordinate{ x: cx as i32, y: cy as i32});
+                            linestring_points.push(Coord{ x: cx as i32, y: cy as i32});
                         }
                     } else {
                         assert!(false);
@@ -684,7 +686,7 @@ impl DrawingCommands {
                 }
 
             },
-            vector_tile::Tile_GeomType::POLYGON => {
+            vector_tile::tile::GeomType::POLYGON => {
                 let mut cx = 0;
                 let mut cy = 0;
                 if commands.0.len() % 3 != 0 {
@@ -700,7 +702,7 @@ impl DrawingCommands {
                         let (dx, dy) = points[0];
                         cx += dx;
                         cy += dy;
-                        linestring_points.push(Coordinate{ x:cx as i32, y: cy as i32});
+                        linestring_points.push(Coord{ x:cx as i32, y: cy as i32});
                     } else {
                         assert!(false);
                     }
@@ -715,7 +717,7 @@ impl DrawingCommands {
                         for &(dx, dy) in points.into_iter() {
                             cx += dx;
                             cy += dy;
-                            linestring_points.push(Coordinate{ x:cx as i32, y: cy as i32});
+                            linestring_points.push(Coord{ x:cx as i32, y: cy as i32});
                         }
                     } else {
                         return Err(format_err!("Expecting a LineTo command, got a {:?}. All cmds {:?}", cmds[1], cmds));
@@ -763,7 +765,7 @@ impl DrawingCommands {
                     Ok(Geometry::MultiPolygon(MultiPolygon(polygons)))
                 }
             },
-            vector_tile::Tile_GeomType::UNKNOWN => unreachable!(),
+            vector_tile::tile::GeomType::UNKNOWN => unreachable!(),
         }
     }
 }
@@ -819,12 +821,12 @@ impl From<Vec<u32>> for DrawingCommands {
     }
 }
 
-fn decode_geom(data: &[u32], geom_type: &vector_tile::Tile_GeomType) -> Result<Geometry<i32>, Error> {
+fn decode_geom(data: &[u32], geom_type: &vector_tile::tile::GeomType) -> Result<Geometry<i32>, Error> {
     let cmds: DrawingCommands = data.into();
     cmds.try_to_geometry()
 }
 
-fn deduce_geom_type(cmds: &DrawingCommands) -> vector_tile::Tile_GeomType {
+fn deduce_geom_type(cmds: &DrawingCommands) -> vector_tile::tile::GeomType {
     let cmds = &cmds.0;
 
     // There are definitly ways for the input to be invalid where it should return UNKNOWN. e.g.
@@ -832,16 +834,16 @@ fn deduce_geom_type(cmds: &DrawingCommands) -> vector_tile::Tile_GeomType {
     // should be UNKNOWN. But for valid DrawingCommands, it should be accurate.
 
     if cmds.len() == 1 && cmds[0].is_moveto() {
-        vector_tile::Tile_GeomType::POINT
+        vector_tile::tile::GeomType::POINT
     } else if cmds.iter().any(|cmd| cmd.is_closepath()) {
-        vector_tile::Tile_GeomType::POLYGON
+        vector_tile::tile::GeomType::POLYGON
     } else {
-        vector_tile::Tile_GeomType::LINESTRING
+        vector_tile::tile::GeomType::LINESTRING
     }
 
 }
 
-fn move_cursor(current: &mut (i32, i32), point: &Coordinate<i32>) -> (i32, i32) {
+fn move_cursor(current: &mut (i32, i32), point: &Coord<i32>) -> (i32, i32) {
     let x = point.x;
     let y = point.y;
 
