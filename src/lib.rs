@@ -229,7 +229,7 @@ impl<T> TagIndex<T>
     }
 
     fn add_item(&mut self, item: &T) {
-        match self._data.iter().enumerate().filter(|&(i, &(num, ref val))| val == item).take(1).nth(0) {
+        match self._data.iter().enumerate().filter(|&(i, &(num, ref val))| val == item).take(1).next() {
             None => {
                 // not found, insert at end
                 self._data.push((1, item.clone()));
@@ -256,7 +256,7 @@ impl<T> TagIndex<T>
     }
 
     fn index_for_item(&self, item: &T) -> usize {
-        self._data.iter().enumerate().filter_map(|(i, &(num, ref val))| if val == item { Some(i) } else { None }).take(1).nth(0).unwrap()
+        self._data.iter().enumerate().filter_map(|(i, &(num, ref val))| if val == item { Some(i) } else { None }).take(1).next().unwrap()
     }
 
     // FIXME getting warnings about lifetime for T
@@ -271,8 +271,8 @@ fn create_indexes(features: &Vec<Feature>) -> (TagIndex<String>, TagIndex<Value>
 
     for f in features.iter() {
         for (k, v) in f.properties.0.iter() {
-            keys.add_item(&k);
-            values.add_item(&v);
+            keys.add_item(k);
+            values.add_item(v);
         }
     }
 
@@ -297,7 +297,7 @@ impl Into<vector_tile::tile::Layer> for Layer {
             let mut pbf_feature = vector_tile::tile::Feature::new();
             for (k, v) in f.properties.0.iter() {
                 pbf_feature.tags.push(keys.index_for_item(k) as u32);
-                pbf_feature.tags.push(values.index_for_item(&v) as u32);
+                pbf_feature.tags.push(values.index_for_item(v) as u32);
             }
             let geom: DrawingCommands = (&f.geometry).into();
             pbf_feature.geometry = geom.into();
@@ -379,7 +379,7 @@ impl Tile {
     }
 
     pub fn from_uncompressed_bytes_with_tactic(bytes: &[u8], invalid_geom_tactic: InvalidGeometryTactic) -> Result<Tile, Error> {
-        let mut tile = vector_tile::Tile::parse_from_bytes(&bytes)?;
+        let mut tile = vector_tile::Tile::parse_from_bytes(bytes)?;
         pbftile_to_tile(tile, invalid_geom_tactic)
     }
 
@@ -390,13 +390,13 @@ impl Tile {
 
     pub fn set_locations(&mut self, geometry_tile: &slippy_map_tiles::Tile) {
         for l in self.layers.iter_mut() {
-            l.set_locations(&geometry_tile);
+            l.set_locations(geometry_tile);
         }
     }
 
     pub fn add_feature(&mut self, layer_name: &str, f: Feature) {
         // TODO proper error for layer name not found
-        let layer = self.layers.iter_mut().filter(|l| l.name == layer_name).nth(0).unwrap();
+        let layer = self.layers.iter_mut().find(|l| l.name == layer_name).unwrap();
         layer.add_feature(f);
     }
 
@@ -412,9 +412,9 @@ impl Tile {
         // TODO this should return a Result, and we can then do something better than an assert
         self.write_to(&mut compressor);
         compressor.flush().unwrap();
-        let new_bytes = compressor.finish().unwrap();
+        
 
-        new_bytes
+        compressor.finish().unwrap()
     }
 
     pub fn write_to<W: Write>(self, writer: &mut W)  {
@@ -439,17 +439,17 @@ impl Tile {
 
     pub fn get_layer(&self, layer_name: impl AsRef<str>) -> Option<&Layer> {
         let layer_name: &str = layer_name.as_ref();
-        self.layers.iter().filter(|l| l.name == layer_name).nth(0)
+        self.layers.iter().find(|l| l.name == layer_name)
     }
 
     pub fn get_layer_mut(&mut self, layer_name: impl AsRef<str>) -> Option<&mut Layer> {
         let layer_name: &str = layer_name.as_ref();
-        self.layers.iter_mut().filter(|l| l.name == layer_name).nth(0)
+        self.layers.iter_mut().find(|l| l.name == layer_name)
     }
 
     pub fn remove_layer(&mut self, layer_name: impl AsRef<str>) -> Option<Layer> {
         let layer_name: &str = layer_name.as_ref();
-        let i = self.layers.iter().enumerate().filter_map(|(i, l)| if l.name == layer_name { Some(i) } else { None }).nth(0);
+        let i = self.layers.iter().enumerate().filter_map(|(i, l)| if l.name == layer_name { Some(i) } else { None }).next();
         match i {
             Some(i) => Some(self.layers.remove(i)),
             None => None,
@@ -516,11 +516,11 @@ impl From<vector_tile::tile::Value> for Value {
     }
 }
 
-impl Into<vector_tile::tile::Value> for Value {
-    fn into(self) -> vector_tile::tile::Value {
+impl From<Value> for vector_tile::tile::Value {
+    fn from(val: Value) -> Self {
         let mut res = vector_tile::tile::Value::new();
-        match self {
-            Value::String(s) => res.set_string_value(Rc::try_unwrap(s).unwrap_or_else(|s| (&*s).clone())),
+        match val {
+            Value::String(s) => res.set_string_value(Rc::try_unwrap(s).unwrap_or_else(|s| (*s).clone())),
             Value::Float(s) => res.set_float_value(s),
             Value::Double(s) => res.set_double_value(s),
             Value::Int(s) => res.set_int_value(s),
@@ -623,18 +623,18 @@ impl DrawingCommands {
                 assert_eq!(commands.0.len(), 1);
                     match commands.0[0] {
                     DrawingCommand::MoveTo(ref points) => {
-                        if points.len() == 0 {
+                        if points.is_empty() {
                             unreachable!()
                         } else if points.len() == 1 {
-                            Ok(Geometry::Point(Point::new(points[0].0 as i32, points[0].1 as i32)))
+                            Ok(Geometry::Point(Point::new(points[0].0, points[0].1)))
                         } else if points.len() > 1 {
                             let mut cx = 0;
                             let mut cy = 0;
                             let mut new_points = Vec::with_capacity(points.len());
-                            for p in points.into_iter() {
-                                cx = cx + p.0;
-                                cy = cy + p.1;
-                                new_points.push(Point::new(cx as i32, cy as i32));
+                            for p in points.iter() {
+                                cx += p.0;
+                                cy += p.1;
+                                new_points.push(Point::new(cx, cy));
                             }
                             Ok(Geometry::MultiPoint(MultiPoint(new_points)))
                         } else {
@@ -659,17 +659,17 @@ impl DrawingCommands {
                         let (dx, dy) = points[0];
                         cx += dx;
                         cy += dy;
-                        linestring_points.push(Coord{x: cx as i32, y: cy as i32});
+                        linestring_points.push(Coord{x: cx, y: cy});
                     } else {
                         assert!(false);
                     }
                     if let DrawingCommand::LineTo(ref points) = cmds[1] {
-                        assert!(points.len() > 0);
+                        assert!(!points.is_empty());
                         linestring_points.reserve(points.len());
-                        for &(dx, dy) in points.into_iter() {
+                        for &(dx, dy) in points.iter() {
                             cx += dx;
                             cy += dy;
-                            linestring_points.push(Coord{ x: cx as i32, y: cy as i32});
+                            linestring_points.push(Coord{ x: cx, y: cy});
                         }
                     } else {
                         assert!(false);
@@ -678,7 +678,7 @@ impl DrawingCommands {
                     lines.push(LineString(linestring_points));
                 }
 
-                assert!(lines.len() > 0);
+                assert!(!lines.is_empty());
                 if lines.len() == 1 {
                     Ok(Geometry::LineString(lines.remove(0)))
                 } else {
@@ -702,7 +702,7 @@ impl DrawingCommands {
                         let (dx, dy) = points[0];
                         cx += dx;
                         cy += dy;
-                        linestring_points.push(Coord{ x:cx as i32, y: cy as i32});
+                        linestring_points.push(Coord{ x:cx, y: cy});
                     } else {
                         assert!(false);
                     }
@@ -714,10 +714,10 @@ impl DrawingCommands {
                             return Err(format_err!("Invalid number of points for a polygon, got {} and we need > 1: cmds: {:?}", points.len(), cmds));
                         }
                         linestring_points.reserve(points.len());
-                        for &(dx, dy) in points.into_iter() {
+                        for &(dx, dy) in points.iter() {
                             cx += dx;
                             cy += dy;
-                            linestring_points.push(Coord{ x:cx as i32, y: cy as i32});
+                            linestring_points.push(Coord{ x:cx, y: cy});
                         }
                     } else {
                         return Err(format_err!("Expecting a LineTo command, got a {:?}. All cmds {:?}", cmds[1], cmds));
@@ -732,28 +732,28 @@ impl DrawingCommands {
                     }
                 }
 
-                if rings.len() == 0 {
+                if rings.is_empty() {
                     return Err(format_err!("No valid rings created"));
                 }
                 let mut polygons = Vec::new();
                 loop {
-                    if rings.len() == 0 {
+                    if rings.is_empty() {
                         break;
                     }
                     let (exterior_ring, winding_order) = rings.remove(0);
                     let mut inner_rings = Vec::new();
-                    if rings.len() > 0 {
+                    if !rings.is_empty() {
                         loop {
-                            if rings.len() == 0 || rings[0].1 == Some(WindingOrder::Clockwise)  {
+                            if rings.is_empty() || rings[0].1 == Some(WindingOrder::Clockwise)  {
                                 break;
                             }
-                            assert!(rings.len() > 0);
+                            assert!(!rings.is_empty());
                             inner_rings.push(rings.remove(0).0);
                         }
                     }
                     polygons.push(Polygon::new(exterior_ring, inner_rings));
                 }
-                if polygons.len() == 0 {
+                if polygons.is_empty() {
                     return Err(format_err!("No valid polygons created"));
                 }
 
@@ -885,7 +885,7 @@ impl<'a> From<&'a LineString<i32>> for DrawingCommands {
 
         let mut offsets = Vec::with_capacity(ls.0.len()-1);
         for p in ls.0.iter().skip(1) {
-            offsets.push(move_cursor(&mut cursor, &p));
+            offsets.push(move_cursor(&mut cursor, p));
         }
 
         cmds.push(DrawingCommand::LineTo(offsets));
@@ -909,7 +909,7 @@ impl<'a> From<&'a MultiLineString<i32>> for DrawingCommands {
 
             let mut offsets = Vec::with_capacity(line.0.len()-1);
             for p in line.0.iter().skip(1) {
-                offsets.push(move_cursor(&mut cursor, &p));
+                offsets.push(move_cursor(&mut cursor, p));
             }
 
             cmds.push(DrawingCommand::LineTo(offsets));
@@ -935,7 +935,7 @@ impl<'a> From<&'a Polygon<i32>> for DrawingCommands {
             if i == 0 || i == poly.exterior().0.len() - 1 {
                 continue;
             }
-            offsets.push(move_cursor(&mut cursor, &p));
+            offsets.push(move_cursor(&mut cursor, p));
         }
 
         cmds.push(DrawingCommand::LineTo(offsets));
@@ -949,7 +949,7 @@ impl<'a> From<&'a Polygon<i32>> for DrawingCommands {
                 if i == 0 || i == int_ring.0.len() - 1 {
                     continue;
                 }
-                offsets.push(move_cursor(&mut cursor, &p));
+                offsets.push(move_cursor(&mut cursor, p));
             }
 
             cmds.push(DrawingCommand::LineTo(offsets));
@@ -980,7 +980,7 @@ impl<'a> From<&'a MultiPolygon<i32>> for DrawingCommands {
                 if i == 0 || i == poly.exterior().0.len() - 1 {
                     continue;
                 }
-                offsets.push(move_cursor(&mut cursor, &p));
+                offsets.push(move_cursor(&mut cursor, p));
             }
 
             cmds.push(DrawingCommand::LineTo(offsets));
@@ -994,7 +994,7 @@ impl<'a> From<&'a MultiPolygon<i32>> for DrawingCommands {
                     if i == 0 || i == int_ring.0.len() - 1 {
                         continue;
                     }
-                    offsets.push(move_cursor(&mut cursor, &p));
+                    offsets.push(move_cursor(&mut cursor, p));
                 }
 
                 cmds.push(DrawingCommand::LineTo(offsets));
@@ -1011,12 +1011,12 @@ impl<'a> From<&'a MultiPolygon<i32>> for DrawingCommands {
 impl<'a> From<&'a Geometry<i32>> for DrawingCommands {
     fn from(g: &'a Geometry<i32>) -> DrawingCommands {
         match g {
-            &Geometry::Point(ref x) => x.into(),
-            &Geometry::LineString(ref x) => x.into(),
-            &Geometry::Polygon(ref x) => x.into(),
-            &Geometry::MultiPoint(ref x) => x.into(),
-            &Geometry::MultiLineString(ref x) => x.into(),
-            &Geometry::MultiPolygon(ref x) => x.into(),
+            Geometry::Point(x) => x.into(),
+            Geometry::LineString(x) => x.into(),
+            Geometry::Polygon(x) => x.into(),
+            Geometry::MultiPoint(x) => x.into(),
+            Geometry::MultiLineString(x) => x.into(),
+            Geometry::MultiPolygon(x) => x.into(),
             _ => unimplemented!(),
         }
     }
