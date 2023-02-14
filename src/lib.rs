@@ -172,7 +172,7 @@ impl Layer {
         let x_func = |x: i32| left + (x / extent) * width;
         let y_func = |y: i32| top + (y / extent) * height;
 
-        for f in self.features.iter_mut() {
+        for f in &mut self.features {
             f.translate_geometry(&x_func, &y_func);
         }
     }
@@ -293,7 +293,7 @@ fn create_indexes(features: &[Feature]) -> (TagIndex<String>, TagIndex<Value>) {
     let mut values: TagIndex<Value> = TagIndex::new();
 
     for f in features.iter() {
-        for (k, v) in f.properties.0.iter() {
+        for (k, v) in &f.properties.0 {
             keys.add_item(k);
             values.add_item(v);
         }
@@ -319,9 +319,9 @@ impl From<Layer> for vector_tile::tile::Layer {
         let (keys, values) = create_indexes(&features);
 
         // There's lots of 'cannot move out of borrowed context' errors here
-        for f in features.into_iter() {
+        for f in features {
             let mut pbf_feature = vector_tile::tile::Feature::new();
-            for (k, v) in f.properties.0.iter() {
+            for (k, v) in &f.properties.0 {
                 pbf_feature.tags.push(keys.index_for_item(k) as u32);
                 pbf_feature.tags.push(values.index_for_item(v) as u32);
             }
@@ -418,7 +418,7 @@ impl Tile {
     }
 
     pub fn set_locations(&mut self, geometry_tile: &slippy_map_tiles::Tile) {
-        for l in self.layers.iter_mut() {
+        for l in &mut self.layers {
             l.set_locations(geometry_tile);
         }
     }
@@ -466,7 +466,7 @@ impl Tile {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.layers.iter().all(|l| l.is_empty())
+        self.layers.iter().all(Layer::is_empty)
     }
 
     pub fn get_layer(&self, layer_name: impl AsRef<str>) -> Option<&Layer> {
@@ -498,7 +498,7 @@ impl From<Tile> for vector_tile::Tile {
     fn from(v: Tile) -> Self {
         let mut result = vector_tile::Tile::new();
 
-        for layer in v.layers.into_iter() {
+        for layer in v.layers {
             if !layer.is_empty() {
                 result.layers.push(layer.into());
             }
@@ -655,8 +655,8 @@ fn pbflayer_to_layer(
 
     Ok(Layer {
         name,
-        extent,
         features,
+        extent,
     })
 }
 
@@ -764,7 +764,7 @@ impl DrawingCommands {
                 let mut cx = 0;
                 let mut cy = 0;
                 if commands.0.len() % 3 != 0 {
-                    return Err(format_err!("Drawing commands are invalid. There are {} commands, and it must be a multiple of 3: {:?}", commands.0.len(), commands));
+                    return Err(format_err!("Drawing commands are invalid. There are {} commands, and it must be a multiple of 3: {commands:?}", commands.0.len()));
                 }
                 let mut rings = Vec::with_capacity(commands.0.len() / 3);
                 for cmds in commands.0.chunks(3) {
@@ -785,7 +785,7 @@ impl DrawingCommands {
                             // I have seen live data which is MoveTo([(77, -11)]), LineTo([(0,
                             // 0)]), ClosePath, that's invalid MVT data. "continue" means don't add
                             // linestring_points to rings, meaning this ring will be skipped
-                            return Err(format_err!("Invalid number of points for a polygon, got {} and we need > 1: cmds: {:?}", points.len(), cmds));
+                            return Err(format_err!("Invalid number of points for a polygon, got {} and we need > 1: cmds: {cmds:?}", points.len()));
                         }
                         linestring_points.reserve(points.len());
                         for &(dx, dy) in points.iter() {
@@ -795,9 +795,8 @@ impl DrawingCommands {
                         }
                     } else {
                         return Err(format_err!(
-                            "Expecting a LineTo command, got a {:?}. All cmds {:?}",
+                            "Expecting a LineTo command, got a {:?}. All cmds {cmds:?}",
                             cmds[1],
-                            cmds
                         ));
                     }
                     if let DrawingCommand::ClosePath = cmds[2] {
@@ -916,7 +915,7 @@ fn deduce_geom_type(cmds: &DrawingCommands) -> vector_tile::tile::GeomType {
 
     if cmds.len() == 1 && cmds[0].is_moveto() {
         vector_tile::tile::GeomType::POINT
-    } else if cmds.iter().any(|cmd| cmd.is_closepath()) {
+    } else if cmds.iter().any(DrawingCommand::is_closepath) {
         vector_tile::tile::GeomType::POLYGON
     } else {
         vector_tile::tile::GeomType::LINESTRING
@@ -947,7 +946,7 @@ impl<'a> From<&'a MultiPoint<i32>> for DrawingCommands {
     fn from(mp: &'a MultiPoint<i32>) -> DrawingCommands {
         let mut offsets = Vec::with_capacity(mp.0.len());
         let mut cursor = (0, 0);
-        for p in mp.0.iter() {
+        for p in &mp.0 {
             offsets.push(move_cursor(&mut cursor, &p.0));
         }
 
